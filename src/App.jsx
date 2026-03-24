@@ -17,7 +17,7 @@ const daysAhead = (d) => new Date(today.getTime() + d * 86400000).toISOString().
 // Les 2 managers n'ont PAS de mot de passe → première connexion = création mdp
 const INITIAL_USERS = [
   {
-    id:"manager-1", nom:"Patrick Rollot", email:"p.rollot@orpi.com",
+    id:"manager-1", nom:"Pierre Rollot", email:"p.rollot@orpi.com",
     password:null,  // pas de mdp → doit créer le sien à la 1ère connexion
     role:"manager", agenceId:"agence-1", actif:true,
     createdAt:daysAgo(365), avatar:"PR", premierAcces:true
