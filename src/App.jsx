@@ -93,34 +93,170 @@ const INITIAL_OBJECTIFS = [
   { agentId:"agent-5", agenceId:"agence-1", annee:2025, montantHT:38000 },
 ];
 
-function load(key, fallback) {
-  try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; }
-  catch { return fallback; }
-}
+// ─── CLÉ STABLE — NE JAMAIS CHANGER ─────────────────────────────────────────
+// Ces clés sont fixes. Les données de production y sont stockées.
+// Pour ajouter des champs : utiliser migrerDonnees() ci-dessous.
+const STORAGE_KEYS = {
+  users:       "orpi_data_users",
+  agences:     "orpi_data_agences",
+  mandats:     "orpi_data_mandats",
+  locations:   "orpi_data_locations",
+  gestion:     "orpi_data_gestion",
+  invitations: "orpi_data_invitations",
+  objectifs:   "orpi_data_objectifs",
+  version:     "orpi_data_version",
+};
+
+// Version actuelle du schéma de données
+// À incrémenter UNIQUEMENT quand on ajoute de nouveaux champs nécessitant une migration
+const SCHEMA_VERSION = 1;
+
 function save(key, value) {
   try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
 }
 
+function loadRaw(key) {
+  try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : null; }
+  catch { return null; }
+}
+
+// ─── MIGRATION SÉCURISÉE ──────────────────────────────────────────────────────
+// Récupère les données existantes (toutes versions confondues) ou les données initiales
+// GARANTIT qu'aucune donnée de production n'est perdue
+function loadOrMigrate(stableKey, legacyKeys, initial, migrateFn) {
+  // 1. Cherche d'abord sur la clé stable (production)
+  const stable = loadRaw(stableKey);
+  if (stable !== null) return migrateFn ? migrateFn(stable) : stable;
+
+  // 2. Cherche sur les anciennes clés versionnées (migration depuis l'ancienne appli)
+  for (const oldKey of legacyKeys) {
+    const old = loadRaw(oldKey);
+    if (old !== null) {
+      console.log(`[Migration] Récupération depuis ${oldKey} → ${stableKey}`);
+      const migrated = migrateFn ? migrateFn(old) : old;
+      // Sauvegarde sur la clé stable
+      save(stableKey, migrated);
+      // Supprime l'ancienne clé pour éviter la confusion
+      try { localStorage.removeItem(oldKey); } catch {}
+      return migrated;
+    }
+  }
+
+  // 3. Aucune donnée trouvée → données initiales (première utilisation)
+  save(stableKey, initial);
+  return initial;
+}
+
+// ─── FONCTIONS DE MIGRATION PAR COLLECTION ────────────────────────────────────
+// Ajouter ici les migrations futures sans jamais casser les données existantes
+
+function migrateUsers(users) {
+  // S'assure que chaque user a tous les champs requis
+  return users.map(u => ({
+    premierAcces: false,
+    invitationAcceptee: u.role === "manager" ? true : false,
+    ...u, // les données existantes écrasent les valeurs par défaut
+  }));
+}
+
+function migrateMandats(mandats) {
+  // S'assure que chaque mandat a tous les champs requis
+  return mandats.map(m => ({
+    clausesSuspensivesLevees: false,
+    typeMandat: "simple",
+    ...m,
+  }));
+}
+
+function migrateLocations(locations) {
+  return locations.map(l => ({
+    locataireTrouve: false,
+    locataireNom: "", locatairePrenom: "",
+    locataireTel: "", locataireMail: "",
+    ...l,
+  }));
+}
+
+function migrateGestion(gestion) {
+  return gestion.map(g => ({
+    actif: true,
+    commissionPct: 8,
+    commissionMensuelle: Math.round((g.loyer || 0) * 0.08),
+    ...g,
+  }));
+}
+
+function migrateObjectifs(objectifs) {
+  return objectifs.map(o => ({
+    annee: new Date().getFullYear(),
+    ...o,
+  }));
+}
+
+// ─── CHARGEMENT INITIAL AVEC MIGRATION ────────────────────────────────────────
+function loadAllData() {
+  return {
+    users: loadOrMigrate(
+      STORAGE_KEYS.users,
+      ["orpi_users_v4","orpi_users_v3","orpi_users_v2"],
+      INITIAL_USERS, migrateUsers
+    ),
+    agences: loadOrMigrate(
+      STORAGE_KEYS.agences,
+      ["orpi_agences_v4","orpi_agences_v3","orpi_agences_v2"],
+      INITIAL_AGENCES, null
+    ),
+    mandats: loadOrMigrate(
+      STORAGE_KEYS.mandats,
+      ["orpi_mandats_v4","orpi_mandats_v3","orpi_mandats_v2","orpi_mandats_v1"],
+      INITIAL_MANDATS, migrateMandats
+    ),
+    locations: loadOrMigrate(
+      STORAGE_KEYS.locations,
+      ["orpi_locations_v4","orpi_locations_v3"],
+      INITIAL_LOCATIONS, migrateLocations
+    ),
+    gestion: loadOrMigrate(
+      STORAGE_KEYS.gestion,
+      ["orpi_gestion_v4","orpi_gestion_v3"],
+      INITIAL_GESTION, migrateGestion
+    ),
+    invitations: loadOrMigrate(
+      STORAGE_KEYS.invitations,
+      ["orpi_invitations_v4","orpi_invitations_v3","orpi_invitations_v2"],
+      INITIAL_INVITATIONS, null
+    ),
+    objectifs: loadOrMigrate(
+      STORAGE_KEYS.objectifs,
+      ["orpi_objectifs_v4"],
+      INITIAL_OBJECTIFS, migrateObjectifs
+    ),
+  };
+}
+
 export default function App() {
+  // Chargement unique au démarrage avec migration automatique
+  const [initialData] = useState(() => loadAllData());
+
   const [currentUser, setCurrentUser] = useState(null);
-  const [users,       setUsersRaw]    = useState(() => load("orpi_users_v4",     INITIAL_USERS));
-  const [agences,     setAgencesRaw]  = useState(() => load("orpi_agences_v4",   INITIAL_AGENCES));
-  const [mandats,     setMandatsRaw]  = useState(() => load("orpi_mandats_v4",   INITIAL_MANDATS));
-  const [locations,   setLocsRaw]     = useState(() => load("orpi_locations_v4", INITIAL_LOCATIONS));
-  const [gestion,     setGestRaw]     = useState(() => load("orpi_gestion_v4",   INITIAL_GESTION));
-  const [invitations, setInvRaw]      = useState(() => load("orpi_invitations_v4", INITIAL_INVITATIONS));
-  const [objectifs,   setObjRaw]      = useState(() => load("orpi_objectifs_v4",   INITIAL_OBJECTIFS));
+  const [users,       setUsersRaw]    = useState(initialData.users);
+  const [agences,     setAgencesRaw]  = useState(initialData.agences);
+  const [mandats,     setMandatsRaw]  = useState(initialData.mandats);
+  const [locations,   setLocsRaw]     = useState(initialData.locations);
+  const [gestion,     setGestRaw]     = useState(initialData.gestion);
+  const [invitations, setInvRaw]      = useState(initialData.invitations);
+  const [objectifs,   setObjRaw]      = useState(initialData.objectifs);
   const [page,        setPage]        = useState("login"); // login | app | setpassword | firstpassword
   const [invToken,    setInvToken]    = useState(null);
   const [pendingUser, setPendingUser] = useState(null); // manager en attente de créer son mdp
 
-  const setUsers      = useCallback((u) => { const v=typeof u==="function"?u(users):u;      setUsersRaw(v);   save("orpi_users_v4",v);      }, [users]);
-  const setAgences    = useCallback((u) => { const v=typeof u==="function"?u(agences):u;    setAgencesRaw(v); save("orpi_agences_v4",v);    }, [agences]);
-  const setMandats    = useCallback((u) => { const v=typeof u==="function"?u(mandats):u;    setMandatsRaw(v); save("orpi_mandats_v4",v);    }, [mandats]);
-  const setLocations  = useCallback((u) => { const v=typeof u==="function"?u(locations):u;  setLocsRaw(v);    save("orpi_locations_v4",v);  }, [locations]);
-  const setGestion    = useCallback((u) => { const v=typeof u==="function"?u(gestion):u;    setGestRaw(v);    save("orpi_gestion_v4",v);    }, [gestion]);
-  const setInvitations= useCallback((u) => { const v=typeof u==="function"?u(invitations):u;setInvRaw(v);    save("orpi_invitations_v4",v);}, [invitations]);
-  const setObjectifs  = useCallback((u) => { const v=typeof u==="function"?u(objectifs):u;   setObjRaw(v);    save("orpi_objectifs_v4",v);  }, [objectifs]);
+  const setUsers      = useCallback((u) => { const v=typeof u==="function"?u(users):u;      setUsersRaw(v);   save(STORAGE_KEYS.users,v);      }, [users]);
+  const setAgences    = useCallback((u) => { const v=typeof u==="function"?u(agences):u;    setAgencesRaw(v); save(STORAGE_KEYS.agences,v);    }, [agences]);
+  const setMandats    = useCallback((u) => { const v=typeof u==="function"?u(mandats):u;    setMandatsRaw(v); save(STORAGE_KEYS.mandats,v);    }, [mandats]);
+  const setLocations  = useCallback((u) => { const v=typeof u==="function"?u(locations):u;  setLocsRaw(v);    save(STORAGE_KEYS.locations,v);  }, [locations]);
+  const setGestion    = useCallback((u) => { const v=typeof u==="function"?u(gestion):u;    setGestRaw(v);    save(STORAGE_KEYS.gestion,v);    }, [gestion]);
+  const setInvitations= useCallback((u) => { const v=typeof u==="function"?u(invitations):u;setInvRaw(v);    save(STORAGE_KEYS.invitations,v);}, [invitations]);
+  const setObjectifs  = useCallback((u) => { const v=typeof u==="function"?u(objectifs):u;   setObjRaw(v);    save(STORAGE_KEYS.objectifs,v);  }, [objectifs]);
 
   // Vérif token invitation dans URL
   useEffect(() => {
