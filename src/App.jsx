@@ -23,7 +23,7 @@ const INITIAL_USERS = [
     createdAt:daysAgo(365), avatar:"PR", premierAcces:true
   },
   {
-    id:"manager-2", nom:"F. Carré", email:"f.carre@orpi.com",
+    id:"manager-2", nom:"Frédéric Carré", email:"f.carre@orpi.com",
     password:null,
     role:"manager", agenceId:"agence-1", actif:true,
     createdAt:daysAgo(365), avatar:"FC", premierAcces:true
